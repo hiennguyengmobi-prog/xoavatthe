@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Magic Eraser - Smart Zoom & Auto Skin Protect</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            touch-action: none;
+            user-select: none;
+        }
+
+        .canvas-bg {
+            background-image: 
+                linear-gradient(45deg, #1f2937 25%, transparent 25%), 
+                linear-gradient(-45deg, #1f2937 25%, transparent 25%), 
+                linear-gradient(45deg, transparent 75%, #1f2937 75%), 
+                linear-gradient(-45deg, transparent 75%, #1f2937 75%);
+            background-size: 16px 16px;
+            background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+            background-color: #111827;
+        }
+
+        #brush-cursor {
+            pointer-events: none;
+            position: fixed;
+            border-radius: 50%;
+            border: 2px solid rgba(239, 68, 68, 0.9);
+            background-color: rgba(239, 68, 68, 0.25);
+            transform: translate(-50%, -50%);
+            z-index: 9999;
+            display: none;
+        }
+
+        /* Custom Range Slider Styling */
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #6366f1;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+
+        .mode-active {
+            background-color: #4f46e5 !important;
+            color: #ffffff !important;
+        }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-100 h-full flex flex-col justify-between overflow-hidden">
+
+    <!-- HEADER / NAV -->
+    <header class="h-14 bg-gray-900/90 border-b border-gray-800 px-4 flex items-center justify-between z-20 shrink-0 backdrop-blur-md">
+        <div class="flex items-center space-x-2.5">
+            <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-red-500 to-indigo-600 flex items-center justify-center font-bold text-white shadow-md shadow-red-500/20">
+                <i class="fa-solid fa-wand-magic-sparkles text-sm"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-sm text-gray-100 leading-tight">Magic Eraser</h1>
+                <p class="text-[10px] text-indigo-400 font-medium">Zoom 500% & Auto Protect Tay/Chân</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-2">
+            <!-- Upload Button -->
+            <label class="px-3 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs font-semibold text-gray-200 cursor-pointer transition flex items-center gap-1.5 active:scale-95">
+                <i class="fa-solid fa-image text-indigo-400"></i>
+                <span class="hidden sm:inline">Chọn ảnh</span>
+                <input type="file" id="file-input" accept="image/*" class="hidden">
+            </label>
+
+            <!-- Download Button -->
+            <button id="btn-download" disabled class="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-semibold text-white transition flex items-center gap-1.5 shadow-md shadow-indigo-600/20 active:scale-95">
+                <i class="fa-solid fa-download"></i>
+                <span>Tải về</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN CANVAS WORKSPACE -->
+    <main class="flex-1 relative overflow-hidden canvas-bg flex items-center justify-center" id="workspace">
+        
+        <!-- DROPZONE / INITIAL STATE -->
+        <div id="drop-zone" class="absolute inset-4 sm:inset-10 border-2 border-dashed border-gray-700 hover:border-indigo-500 rounded-3xl flex flex-col items-center justify-center p-6 text-center transition cursor-pointer bg-gray-900/70 backdrop-blur-sm z-30">
+            <div class="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-4 shadow-inner">
+                <i class="fa-solid fa-cloud-arrow-up text-2xl"></i>
+            </div>
+            <h2 class="text-base font-bold text-gray-200 mb-1">Kéo & thả hoặc bấm chọn ảnh</h2>
+            <p class="text-xs text-gray-400 max-w-xs mb-5 leading-relaxed">
+                Phóng to tùy ý để tô chính xác từng chi tiết. Hệ thống tự nhận diện khóa bảo vệ da & phom tay chân.
+            </p>
+            <span class="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30">
+                Tải ảnh lên
+            </span>
+        </div>
+
+        <!-- CANVAS CONTAINER WITH MATRIX TRANSFORM -->
+        <div id="viewport" class="w-full h-full relative cursor-crosshair overflow-hidden hidden">
+            <div id="transform-container" class="absolute origin-top-left transition-transform duration-75 ease-out">
+                <!-- Base Image Canvas -->
+                <canvas id="image-canvas" class="absolute top-0 left-0 block rounded-none"></canvas>
+                <!-- User Mask Canvas -->
+                <canvas id="mask-canvas" class="absolute top-0 left-0 block pointer-events-auto"></canvas>
+            </div>
+        </div>
+
+        <!-- FLOATING ZOOM QUICK BAR (TOP RIGHT) -->
+        <div id="zoom-controls" class="absolute top-4 right-4 z-20 flex items-center space-x-1 bg-gray-900/80 border border-gray-800 p-1.5 rounded-2xl backdrop-blur-md shadow-xl hidden">
+            <button id="btn-zoom-out" title="Thu nhỏ" class="w-8 h-8 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 flex items-center justify-center transition active:scale-90">
+                <i class="fa-solid fa-minus text-xs"></i>
+            </button>
+            <span id="zoom-text" class="text-xs font-mono font-semibold px-2 text-indigo-400 min-w-[50px] text-center">100%</span>
+            <button id="btn-zoom-in" title="Phóng to" class="w-8 h-8 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 flex items-center justify-center transition active:scale-90">
+                <i class="fa-solid fa-plus text-xs"></i>
+            </button>
+            <div class="h-4 w-px bg-gray-700 mx-1"></div>
+            <button id="btn-zoom-reset" title="Đặt lại Kích thước" class="px-2.5 h-8 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold flex items-center justify-center transition active:scale-90">
+                Fit
+            </button>
+        </div>
+
+        <!-- CUSTOM CURSOR FOR PC -->
+        <div id="brush-cursor"></div>
+
+        <!-- LOADING OVERLAY -->
+        <div id="loading-overlay" class="absolute inset-0 bg-gray-950/80 backdrop-blur-sm flex flex-col items-center justify-center z-50 hidden">
+            <div class="w-12 h-12 rounded-full border-3 border-indigo-500/20 border-t-indigo-500 animate-spin mb-3"></div>
+            <p class="text-xs font-semibold text-gray-200" id="loading-text">Đang phân tích cấu trúc da & xóa chữ...</p>
+            <p class="text-[11px] text-gray-400 mt-1">Đang khóa bảo vệ đường nét tay chân...</p>
+        </div>
+    </main>
+
+    <!-- BOTTOM CONTROL BAR -->
+    <footer class="bg-gray-900/95 border-t border-gray-800 p-3 sm:px-6 z-30 shrink-0 backdrop-blur-md">
+        <div class="max-w-xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+            
+            <!-- Mode Switcher & Brush Slider -->
+            <div class="w-full sm:w-auto flex items-center space-x-2 bg-gray-800/80 p-1.5 rounded-2xl border border-gray-700/60 flex-1">
+                <!-- Mode Toggle: Draw vs Pan -->
+                <button id="btn-mode-draw" class="p-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition mode-active" title="Chế độ Bôi cọ">
+                    <i class="fa-solid fa-paintbrush text-xs"></i>
+                    <span class="text-[11px]">Bôi cọ</span>
+                </button>
+                <button id="btn-mode-pan" class="p-2 rounded-xl text-xs font-semibold text-gray-400 hover:text-white flex items-center gap-1.5 transition" title="Chế độ Di chuyển ảnh">
+                    <i class="fa-solid fa-hand text-xs"></i>
+                    <span class="text-[11px]">Di chuyển</span>
+                </button>
+
+                <div class="h-4 w-px bg-gray-700 mx-1"></div>
+
+                <!-- Brush Size Slider -->
+                <input type="range" id="brush-size" min="3" max="100" value="20" class="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                <span id="brush-size-text" class="text-xs font-mono text-gray-300 w-9 text-right shrink-0">20px</span>
+                
+                <div class="h-4 w-px bg-gray-700 mx-1"></div>
+                
+                <!-- Clear Current Mask -->
+                <button id="btn-clear-mask" title="Xóa nét vừa bôi" class="p-2 text-gray-400 hover:text-white rounded-xl hover:bg-gray-700 transition shrink-0 active:scale-90">
+                    <i class="fa-solid fa-eraser text-sm"></i>
+                </button>
+            </div>
+
+            <!-- Action Controls -->
+            <div class="w-full sm:w-auto flex items-center justify-between sm:justify-end space-x-2 shrink-0">
+                <!-- Undo Button -->
+                <button id="btn-undo" disabled class="px-3.5 py-2.5 rounded-xl bg-gray-800 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed border border-gray-700 text-xs font-semibold text-gray-300 transition flex items-center gap-1.5 active:scale-95">
+                    <i class="fa-solid fa-rotate-left"></i>
+                    <span class="hidden sm:inline">Hoàn tác</span>
+                </button>
+
+                <!-- Execute Eraser Button -->
+                <button id="btn-erase" disabled class="flex-1 sm:flex-initial px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-500 to-indigo-600 hover:from-red-600 hover:to-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold text-white transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 active:scale-95">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <span>XÓA NGAY</span>
+                </button>
+            </div>
+
+        </div>
+    </footer>
+
+    <!-- LOGIC JAVASCRIPT -->
+    <script>
+        // State Management
+        const state = {
+            image: null,
+            brushSize: 20,
+            isDrawing: false,
+            isPanning: false,
+            mode: 'draw', // 'draw' or 'pan'
+            
+            // Viewport & Zoom Transform Matrix
+            scale: 1,
+            panX: 0,
+            panY: 0,
+            minScale: 0.2,
+            maxScale: 8.0,
+
+            // Drag Pan temp coordinates
+            startX: 0,
+            startY: 0,
+
+            // Touch Pinch Zoom temp
+            touchDistStart: 0,
+            scaleStart: 1,
+
+            // History Undo
+            history: [],
+            historyIndex: -1,
+            maxHistory: 12
+        };
+
+        // DOM Elements
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const workspace = document.getElementById('workspace');
+        const viewport = document.getElementById('viewport');
+        const transformContainer = document.getElementById('transform-container');
+        const imageCanvas = document.getElementById('image-canvas');
+        const maskCanvas = document.getElementById('mask-canvas');
+        const brushCursor = document.getElementById('brush-cursor');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const zoomControls = document.getElementById('zoom-controls');
+        const zoomText = document.getElementById('zoom-text');
+
+        // Buttons & Inputs
+        const btnErase = document.getElementById('btn-erase');
+        const btnUndo = document.getElementById('btn-undo');
+        const btnClearMask = document.getElementById('btn-clear-mask');
+        const btnDownload = document.getElementById('btn-download');
+        const brushSizeInput = document.getElementById('brush-size');
+        const brushSizeText = document.getElementById('brush-size-text');
+
+        const btnModeDraw = document.getElementById('btn-mode-draw');
+        const btnModePan = document.getElementById('btn-mode-pan');
+        const btnZoomIn = document.getElementById('btn-zoom-in');
+        const btnZoomOut = document.getElementById('btn-zoom-out');
+        const btnZoomReset = document.getElementById('btn-zoom-reset');
+
+        // Canvas Contexts
+        const imgCtx = imageCanvas.getContext('2d', { willReadFrequently: true });
+        const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+
+        // Initialization
+        window.addEventListener('DOMContentLoaded', () => {
+            initEvents();
+        });
+
+        function initEvents() {
+            // File Upload
+            dropZone.addEventListener('click', () => fileInput.click());
+            dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-indigo-500'); });
+            dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-indigo-500'));
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('border-indigo-500');
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) loadImage(e.dataTransfer.files[0]);
+            });
+
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files && e.target.files[0]) loadImage(e.target.files[0]);
+            });
+
+            // Brush Size Slider
+            brushSizeInput.addEventListener('input', (e) => {
+                state.brushSize = parseInt(e.target.value);
+                brushSizeText.innerText = `${state.brushSize}px`;
+                updateCursorSize();
+            });
+
+            // Mode Switching
+            btnModeDraw.addEventListener('click', () => setMode('draw'));
+            btnModePan.addEventListener('click', () => setMode('pan'));
+
+            // Zoom Controls
+            btnZoomIn.addEventListener('click', () => zoomByFactor(1.25));
+            btnZoomOut.addEventListener('click', () => zoomByFactor(0.8));
+            btnZoomReset.addEventListener('click', resetZoomFit);
+
+            // Wheel Zoom
+            workspace.addEventListener('wheel', handleWheelZoom, { passive: false });
+
+            // Cursor movement (PC)
+            workspace.addEventListener('mousemove', updateCursorPos);
+            workspace.addEventListener('mouseenter', () => { if (state.image && state.mode === 'draw') brushCursor.style.display = 'block'; });
+            workspace.addEventListener('mouseleave', () => brushCursor.style.display = 'none');
+
+            // Keyboard Shortcuts (Space key to Pan)
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' && !e.repeat && state.image) {
+                    setMode('pan');
+                }
+            });
+            window.addEventListener('keyup', (e) => {
+                if (e.code === 'Space' && state.image) {
+                    setMode('draw');
+                }
+            });
+
+            // Mouse Interaction on Viewport
+            viewport.addEventListener('mousedown', handlePointerDown);
+            window.addEventListener('mousemove', handlePointerMove);
+            window.addEventListener('mouseup', handlePointerUp);
+
+            // Touch Interaction on Viewport (Mobile Pinch Zoom & Draw/Pan)
+            viewport.addEventListener('touchstart', handleTouchStart, { passive: false });
+            window.addEventListener('touchmove', handleTouchMove, { passive: false });
+            window.addEventListener('touchend', handleTouchEnd);
+
+            // Action Buttons
+            btnErase.addEventListener('click', processAutoProtectionInpaint);
+            btnClearMask.addEventListener('click', clearMask);
+            btnUndo.addEventListener('click', undo);
+            btnDownload.addEventListener('click', downloadResult);
+
+            // Window Resize Auto Fit
+            window.addEventListener('resize', () => {
+                if (state.image) updateCursorSize();
+            });
+        }
+
+        function setMode(mode) {
+            state.mode = mode;
+            if (mode === 'draw') {
+                btnModeDraw.classList.add('mode-active');
+                btnModePan.classList.remove('mode-active');
+                btnModePan.classList.add('text-gray-400');
+                viewport.style.cursor = 'crosshair';
+                if (state.image) brushCursor.style.display = 'block';
+            } else {
+                btnModePan.classList.add('mode-active');
+                btnModeDraw.classList.remove('mode-active');
+                btnModeDraw.classList.add('text-gray-400');
+                viewport.style.cursor = 'grab';
+                brushCursor.style.display = 'none';
+            }
+        }
+
+        function loadImage(file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    state.image = img;
+                    
+                    // Canvas dimensions = Actual original image resolution
+                    imageCanvas.width = img.width;
+                    imageCanvas.height = img.height;
+                    maskCanvas.width = img.width;
+                    maskCanvas.height = img.height;
+
+                    // Draw image to canvas
+                    imgCtx.drawImage(img, 0, 0);
+
+                    // Display elements
+                    dropZone.classList.add('hidden');
+                    viewport.classList.remove('hidden');
+                    zoomControls.classList.remove('hidden');
+                    btnErase.disabled = false;
+                    btnDownload.disabled = false;
+
+                    clearMask();
+                    state.history = [];
+                    state.historyIndex = -1;
+                    saveHistory();
+
+                    resetZoomFit();
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Apply Transform Matrix to Viewport Container
+        function applyTransform() {
+            transformContainer.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.scale})`;
+            zoomText.innerText = `${Math.round(state.scale * 100)}%`;
+            updateCursorSize();
+        }
+
+        function resetZoomFit() {
+            if (!state.image) return;
+            const containerW = workspace.clientWidth;
+            const containerH = workspace.clientHeight;
+
+            const scaleX = (containerW - 32) / imageCanvas.width;
+            const scaleY = (containerH - 32) / imageCanvas.height;
+
+            state.scale = Math.min(scaleX, scaleY, 1.0);
+            state.panX = (containerW - imageCanvas.width * state.scale) / 2;
+            state.panY = (containerH - imageCanvas.height * state.scale) / 2;
+
+            applyTransform();
+        }
+
+        function zoomByFactor(factor, centerScreenX = workspace.clientWidth / 2, centerScreenY = workspace.clientHeight / 2) {
+            const newScale = Math.min(Math.max(state.scale * factor, state.minScale), state.maxScale);
+            if (newScale === state.scale) return;
+
+            // Zoom relative to point centerScreenX, centerScreenY
+            const worldPos = screenToWorld(centerScreenX, centerScreenY);
+            state.scale = newScale;
+            state.panX = centerScreenX - worldPos.x * state.scale;
+            state.panY = centerScreenY - worldPos.y * state.scale;
+
+            applyTransform();
+        }
+
+        function handleWheelZoom(e) {
+            e.preventDefault();
+            const rect = workspace.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
+            zoomByFactor(zoomFactor, mouseX, mouseY);
+        }
+
+        /**
+         * CHUYỂN ĐỔI TỌA ĐỘ CHÍNH XÁC (WORLD MATRIX COORDINATE MAPPING)
+         * Đổi tọa độ màn hình (Screen Viewport) về Tọa độ thực trên Canvas ảnh gốc
+         */
+        function screenToWorld(clientX, clientY) {
+            const rect = workspace.getBoundingClientRect();
+            const screenX = clientX - rect.left;
+            const screenY = clientY - rect.top;
+
+            return {
+                x: (screenX - state.panX) / state.scale,
+                y: (screenY - state.panY) / state.scale
+            };
+        }
+
+        function updateCursorSize() {
+            const displayBrushRadius = (state.brushSize * state.scale);
+            brushCursor.style.width = `${displayBrushRadius}px`;
+            brushCursor.style.height = `${displayBrushRadius}px`;
+        }
+
+        function updateCursorPos(e) {
+            brushCursor.style.left = `${e.clientX}px`;
+            brushCursor.style.top = `${e.clientY}px`;
+        }
+
+        // Pointer Event Handlers (Mouse)
+        function handlePointerDown(e) {
+            if (!state.image) return;
+
+            // Middle Mouse or Pan Mode -> Pan
+            if (e.button === 1 || state.mode === 'pan') {
+                state.isPanning = true;
+                state.startX = e.clientX - state.panX;
+                state.startY = e.clientY - state.panY;
+                viewport.style.cursor = 'grabbing';
+                return;
+            }
+
+            // Left Mouse in Draw Mode -> Paint Mask
+            if (e.button === 0 && state.mode === 'draw') {
+                state.isDrawing = true;
+                const worldPos = screenToWorld(e.clientX, e.clientY);
+                drawPoint(worldPos.x, worldPos.y, true);
+            }
+        }
+
+        function handlePointerMove(e) {
+            if (state.isPanning) {
+                state.panX = e.clientX - state.startX;
+                state.panY = e.clientY - state.startY;
+                applyTransform();
+                return;
+            }
+
+            if (state.isDrawing) {
+                const worldPos = screenToWorld(e.clientX, e.clientY);
+                drawPoint(worldPos.x, worldPos.y, false);
+            }
+        }
+
+        function handlePointerUp() {
+            if (state.isPanning) {
+                state.isPanning = false;
+                viewport.style.cursor = state.mode === 'pan' ? 'grab' : 'crosshair';
+            }
+            if (state.isDrawing) {
+                state.isDrawing = false;
+                maskCtx.beginPath();
+            }
+        }
+
+        // Touch Event Handlers (Mobile Pinch Zoom & Draw)
+        function handleTouchStart(e) {
+            if (!state.image) return;
+
+            if (e.touches.length === 2) {
+                // Dual finger -> Pinch Zoom & Pan
+                e.preventDefault();
+                state.isDrawing = false;
+                state.isPanning = true;
+
+                const t1 = e.touches[0];
+                const t2 = e.touches[1];
+
+                state.touchDistStart = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                state.scaleStart = state.scale;
+
+                const centerClientX = (t1.clientX + t2.clientX) / 2;
+                const centerClientY = (t1.clientY + t2.clientY) / 2;
+                state.startX = centerClientX - state.panX;
+                state.startY = centerClientY - state.panY;
+
+            } else if (e.touches.length === 1) {
+                if (state.mode === 'pan') {
+                    e.preventDefault();
+                    state.isPanning = true;
+                    state.startX = e.touches[0].clientX - state.panX;
+                    state.startY = e.touches[0].clientY - state.panY;
+                } else {
+                    // Single touch -> Draw
+                    e.preventDefault();
+                    state.isDrawing = true;
+                    const worldPos = screenToWorld(e.touches[0].clientX, e.touches[0].clientY);
+                    drawPoint(worldPos.x, worldPos.y, true);
+                }
+            }
+        }
+
+        function handleTouchMove(e) {
+            if (e.touches.length === 2 && state.isPanning) {
+                e.preventDefault();
+                const t1 = e.touches[0];
+                const t2 = e.touches[1];
+
+                const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                const zoomFactor = currentDist / state.touchDistStart;
+
+                const centerClientX = (t1.clientX + t2.clientX) / 2;
+                const centerClientY = (t1.clientY + t2.clientY) / 2;
+
+                zoomByFactor(zoomFactor, centerClientX, centerClientY);
+                state.touchDistStart = currentDist;
+
+            } else if (e.touches.length === 1) {
+                if (state.isPanning) {
+                    e.preventDefault();
+                    state.panX = e.touches[0].clientX - state.startX;
+                    state.panY = e.touches[0].clientY - state.startY;
+                    applyTransform();
+                } else if (state.isDrawing) {
+                    e.preventDefault();
+                    const worldPos = screenToWorld(e.touches[0].clientX, e.touches[0].clientY);
+                    drawPoint(worldPos.x, worldPos.y, false);
+                }
+            }
+        }
+
+        function handleTouchEnd(e) {
+            if (e.touches.length === 0) {
+                state.isPanning = false;
+                state.isDrawing = false;
+                maskCtx.beginPath();
+            }
+        }
+
+        // Draw Mask Point on Canvas World Coordinates
+        function drawPoint(x, y, isStart) {
+            maskCtx.lineWidth = state.brushSize;
+            maskCtx.lineCap = 'round';
+            maskCtx.lineJoin = 'round';
+            maskCtx.fillStyle = 'rgba(239, 68, 68, 0.65)';
+            maskCtx.strokeStyle = 'rgba(239, 68, 68, 0.65)';
+
+            if (isStart) {
+                maskCtx.beginPath();
+                maskCtx.arc(x, y, state.brushSize / 2, 0, Math.PI * 2);
+                maskCtx.fill();
+                maskCtx.beginPath();
+                maskCtx.moveTo(x, y);
+            } else {
+                maskCtx.lineTo(x, y);
+                maskCtx.stroke();
+                maskCtx.beginPath();
+                maskCtx.moveTo(x, y);
+            }
+        }
+
+        function clearMask() {
+            maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        }
+
+        function saveHistory() {
+            if (state.historyIndex < state.history.length - 1) {
+                state.history = state.history.slice(0, state.historyIndex + 1);
+            }
+            const data = imgCtx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+            state.history.push(data);
+            if (state.history.length > state.maxHistory) state.history.shift();
+            else state.historyIndex++;
+
+            btnUndo.disabled = state.historyIndex <= 0;
+        }
+
+        function undo() {
+            if (state.historyIndex > 0) {
+                state.historyIndex--;
+                imgCtx.putImageData(state.history[state.historyIndex], 0, 0);
+                btnUndo.disabled = state.historyIndex <= 0;
+            }
+        }
+
+        function downloadResult() {
+            if (!state.image) return;
+            const a = document.createElement('a');
+            a.download = `magic_eraser_${Date.now()}.png`;
+            a.href = imageCanvas.toDataURL('image/png');
+            a.click();
+        }
+
+        /**
+         * SMART AUTO-SKIN & EDGE PROTECTION INPAINTING ENGINE
+         */
+        function processAutoProtectionInpaint() {
+            const w = imageCanvas.width;
+            const h = imageCanvas.height;
+
+            const imgData = imgCtx.getImageData(0, 0, w, h);
+            const maskData = maskCtx.getImageData(0, 0, w, h);
+
+            const src = imgData.data;
+            const maskPixels = maskData.data;
+
+            // Extract Mask Pixels
+            let hasMask = false;
+            const eraseMask = new Uint8Array(w * h);
+
+            for (let i = 0; i < w * h; i++) {
+                if (maskPixels[i * 4 + 3] > 30) {
+                    eraseMask[i] = 1;
+                    hasMask = true;
+                }
+            }
+
+            if (!hasMask) {
+                alert("Vui lòng bôi đỏ lên vùng chữ hoặc vật thể cần xóa!");
+                return;
+            }
+
+            loadingOverlay.classList.remove('hidden');
+
+            setTimeout(() => {
+                // 1. Detect Skin & Body Edge Constraints
+                const autoProtectedMask = detectAndProtectSkinEdges(src, eraseMask, w, h);
+
+                // 2. Perform Skin-Aware Fast Diffusion
+                smartSkinAwareInpaint(src, eraseMask, autoProtectedMask, w, h);
+
+                // 3. Render Result & Update Canvas
+                imgCtx.putImageData(imgData, 0, 0);
+                saveHistory();
+                clearMask();
+
+                loadingOverlay.classList.add('hidden');
+            }, 60);
+        }
+
+        function detectAndProtectSkinEdges(src, eraseMask, w, h) {
+            const protectMap = new Uint8Array(w * h);
+
+            for (let y = 1; y < h - 1; y++) {
+                for (let x = 1; x < w - 1; x++) {
+                    const idx = y * w + x;
+                    const i = idx * 4;
+
+                    const r = src[i], g = src[i + 1], b = src[i + 2];
+
+                    if (isSkinColor(r, g, b)) {
+                        const edgeMagnitude = getSobelMagnitude(src, x, y, w);
+                        if (edgeMagnitude > 30) {
+                            protectMap[idx] = 2; // Strong Limb Contour Boundary
+                        } else {
+                            protectMap[idx] = 1; // Soft Skin Area
+                        }
+                    }
+                }
+            }
+            return protectMap;
+        }
+
+        function isSkinColor(r, g, b) {
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            
+            const basicSkin = (r > 60) && (g > 35) && (b > 20) && 
+                              (max - min > 12) && 
+                              (Math.abs(r - g) > 10) && 
+                              (r > g) && (r > b);
+
+            const sum = r + g + b;
+            if (sum === 0) return false;
+            const nr = r / sum, ng = g / sum;
+            const normSkin = (nr / ng > 1.15) && ((r * b) / Math.pow(r + g, 2) < 0.12);
+
+            return basicSkin || normSkin;
+        }
+
+        function getSobelMagnitude(src, x, y, w) {
+            const getLuma = (px, py) => {
+                const i = (py * w + px) * 4;
+                return 0.299 * src[i] + 0.587 * src[i + 1] + 0.114 * src[i + 2];
+            };
+
+            const dx = (getLuma(x + 1, y - 1) + 2 * getLuma(x + 1, y) + getLuma(x + 1, y + 1)) -
+                       (getLuma(x - 1, y - 1) + 2 * getLuma(x - 1, y) + getLuma(x - 1, y + 1));
+
+            const dy = (getLuma(x - 1, y + 1) + 2 * getLuma(x, y + 1) + getLuma(x + 1, y + 1)) -
+                       (getLuma(x - 1, y - 1) + 2 * getLuma(x, y - 1) + getLuma(x + 1, y - 1));
+
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function smartSkinAwareInpaint(src, eraseMask, protectMap, w, h) {
+            let borderPixels = [];
+
+            for (let y = 1; y < h - 1; y++) {
+                for (let x = 1; x < w - 1; x++) {
+                    const idx = y * w + x;
+                    if (eraseMask[idx] === 1) {
+                        if (eraseMask[idx - 1] === 0 || eraseMask[idx + 1] === 0 ||
+                            eraseMask[idx - w] === 0 || eraseMask[idx + w] === 0) {
+                            borderPixels.push({ x, y });
+                        }
+                    }
+                }
+            }
+
+            const radius = 18;
+
+            while (borderPixels.length > 0) {
+                const nextBorder = [];
+
+                for (let p = 0; p < borderPixels.length; p++) {
+                    const { x, y } = borderPixels[p];
+                    const idx = y * w + x;
+
+                    if (eraseMask[idx] !== 1) continue;
+
+                    let totalR = 0, totalG = 0, totalB = 0, totalWeight = 0;
+
+                    for (let dy = -radius; dy <= radius; dy += 2) {
+                        for (let dx = -radius; dx <= radius; dx += 2) {
+                            const sx = x + dx;
+                            const sy = y + dy;
+
+                            if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
+
+                            const sIdx = sy * w + sx;
+                            if (eraseMask[sIdx] === 1) continue;
+
+                            const distSq = dx * dx + dy * dy;
+                            if (distSq > radius * radius) continue;
+
+                            let weight = 1.0 / (1.0 + Math.sqrt(distSq));
+
+                            if (protectMap[sIdx] === 2) {
+                                weight *= 3.8; // Maintain edge geometry
+                            } else if (protectMap[sIdx] === 1) {
+                                weight *= 2.2; // Maintain skin texture
+                            }
+
+                            const pix = sIdx * 4;
+                            totalR += src[pix] * weight;
+                            totalG += src[pix + 1] * weight;
+                            totalB += src[pix + 2] * weight;
+                            totalWeight += weight;
+                        }
+                    }
+
+                    if (totalWeight > 0) {
+                        const targetPix = idx * 4;
+                        src[targetPix] = Math.round(totalR / totalWeight);
+                        src[targetPix + 1] = Math.round(totalG / totalWeight);
+                        src[targetPix + 2] = Math.round(totalB / totalWeight);
+
+                        eraseMask[idx] = 0;
+
+                        const neighbors = [
+                            { x: x - 1, y }, { x: x + 1, y },
+                            { x, y: y - 1 }, { x, y: y + 1 }
+                        ];
+
+                        for (const nb of neighbors) {
+                            if (nb.x >= 0 && nb.x < w && nb.y >= 0 && nb.y < h) {
+                                const nbIdx = nb.y * w + nb.x;
+                                if (eraseMask[nbIdx] === 1) {
+                                    nextBorder.push(nb);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                borderPixels = nextBorder;
+            }
+        }
+    </script>
+</body>
+</html>
